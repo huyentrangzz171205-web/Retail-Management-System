@@ -67,6 +67,19 @@ function App() {
   const [categories, setCategories] = useState([]);
 
   const [customers, setCustomers] = useState([]);
+  // Lưu thông tin khách hàng đang được chỉnh sửa
+const [editingCustomer, setEditingCustomer] = useState(null);
+
+// Điều khiển hiển thị modal chỉnh sửa
+const [isEditCustomerModalOpen, setIsEditCustomerModalOpen] = useState(false);
+
+// Lưu dữ liệu biểu mẫu chỉnh sửa
+const [editCustomerForm, setEditCustomerForm] = useState({
+    ho_ten: '',
+    so_dien_thoai: '',
+    email: '',
+    dia_chi: ''
+});
 
   const [ordersHistory, setOrdersHistory] = useState([]);
 
@@ -276,11 +289,43 @@ const fetchData = async () => {
 
 
   useEffect(() => {
-        if (isLoggedIn) {
-      fetchData();
+    if (isLoggedIn) {
+        fetchData();
     }
-  }, [isLoggedIn]);
+}, [isLoggedIn]);
 
+// Dong bo trang thai khach hang giua cac tab
+useEffect(() => {
+    const handleCustomerStatusChange = (event) => {
+        if (event.key !== 'customerStatusChanged' || !event.newValue) {
+            return;
+        }
+
+        try {
+            const data = JSON.parse(event.newValue);
+            const stoppedPhone = data.so_dien_thoai;
+
+            if (stoppedPhone && selectedCustomer === stoppedPhone) {
+                setSelectedCustomer(null);
+                message.info(
+                    'Khách hàng đã ngừng hoạt động và được bỏ chọn khỏi POS!'
+                );
+            }
+
+            fetchData();
+        } catch (error) {
+            console.error('Lỗi đồng bộ trạng thái khách hàng:', error);
+        }
+    };
+
+    window.addEventListener('storage', handleCustomerStatusChange);
+
+    return () => {
+        window.removeEventListener('storage', handleCustomerStatusChange);
+    };
+}, [selectedCustomer]);
+
+    
 
   const handleLogin = async () => {
     if (username.trim() === '' || password.trim() === '') {
@@ -329,15 +374,24 @@ const fetchData = async () => {
 
   // Thêm Khách hàng mới
   const handleAddCustomer = async () => {
-    if (!newPhone || !newName) {
-      message.error('Vui lòng nhập đầy đủ Số điện thoại và Họ tên khách hàng!');
-      return;
-    }
+    if (!newPhone.trim() || !newName.trim()) {
+  message.error('Vui lòng nhập đầy đủ Số điện thoại và Họ tên khách hàng!');
+  return;
+}
+
+// Kiểm tra số điện thoại Việt Nam
+const phoneRegex = /^(0|\+84)[35789][0-9]{8}$/;
+const normalizedPhone = newPhone.trim().replace(/\s+/g, '');
+
+if (!phoneRegex.test(normalizedPhone)) {
+  message.error('Số điện thoại không hợp lệ! Vui lòng nhập số điện thoại Việt Nam gồm 10 chữ số.');
+  return;
+}
 
     try {
       const res = await axios.post(`${API_BASE}/api/customers`, {
-        so_dien_thoai: newPhone,
-        ho_ten: newName
+        so_dien_thoai: normalizedPhone,
+        ho_ten: newName.trim()
       });
 
       if (res.data.success) {
@@ -354,6 +408,101 @@ const fetchData = async () => {
     }
   };
 
+// Mở cửa sổ chỉnh sửa khách hàng
+const handleEditCustomer = (customer) => {
+    setEditingCustomer(customer);
+
+    setEditCustomerForm({
+        ho_ten: customer.ho_ten || '',
+        so_dien_thoai: customer.so_dien_thoai || '',
+        email: customer.email || '',
+        dia_chi: customer.dia_chi || ''
+    });
+
+    setIsEditCustomerModalOpen(true);
+};
+
+// Lưu thông tin khách hàng đã chỉnh sửa
+const handleSaveEditCustomer = async () => {
+    if (
+        !editCustomerForm.ho_ten.trim() ||
+        !editCustomerForm.so_dien_thoai.trim()
+    ) {
+        message.error('Vui lòng nhập họ tên và số điện thoại!');
+        return;
+    }
+
+    try {
+        const response = await axios.put(
+            `${API_BASE}/api/customers/${editingCustomer.id}`,
+            editCustomerForm
+        );
+
+        if (response.data.success) {
+            message.success('Cập nhật khách hàng thành công!');
+            setIsEditCustomerModalOpen(false);
+            setEditingCustomer(null);
+            await fetchData();
+        }
+    } catch (error) {
+        console.error('Lỗi cập nhật khách hàng:', error);
+        message.error(
+            error.response?.data?.message || 'Không thể cập nhật khách hàng!'
+        );
+    }
+};
+
+// THÊM HÀM MỚI NGAY TẠI ĐÂY
+const handleStopCustomer = async (customer) => {
+    try {
+        const response = await axios.put(
+            `${API_BASE}/api/customers/${customer.id}/stop`
+        );
+
+        if (response.data.success) {
+            message.success('Ngừng hoạt động khách hàng thành công!');
+            // Gui tin hieu dong bo sang cac tab khac
+            localStorage.setItem(
+                'customerStatusChanged',
+                JSON.stringify({
+                    so_dien_thoai: customer.so_dien_thoai,
+                    timestamp: Date.now()
+                })
+            );
+
+            // Neu khach hang dang duoc chon tai POS thi bo chon
+            if (selectedCustomer === customer.so_dien_thoai) {
+                setSelectedCustomer(null);
+                message.info('Khách hàng đã được bỏ chọn khỏi đơn hàng POS!');
+            }
+
+            await fetchData();
+        }
+    } catch (error) {
+        console.error('Lỗi ngừng hoạt động khách hàng:', error);
+        message.error(
+            error.response?.data?.message || 'Không thể ngừng hoạt động khách hàng!'
+        );
+    }
+};
+// Ham kich hoat lai khach hang
+const handleActivateCustomer = async (customer) => {
+    try {
+        const response = await axios.put(
+            `${API_BASE}/api/customers/${customer.id}/activate`
+        );
+
+        if (response.data.success) {
+            message.success('Kích hoạt lại khách hàng thành công!');
+            await fetchData();
+        }
+    } catch (error) {
+        console.error('Lỗi kích hoạt khách hàng:', error);
+        message.error(
+            error.response?.data?.message || 'Không thể kích hoạt khách hàng!'
+        );
+    }
+};
 
   // Thêm Nhà Cung Cấp mới
   
@@ -455,6 +604,12 @@ const handleStopSupplier = async (supplier) => {
     const prod = products.find(p => p.ma_sp === prodId);
 
     if (!prod) return;
+    console.log('KIỂM TRA SẢN PHẨM NHẬP KHO:', {
+  id: prod.id,
+  ma_sp: prod.ma_sp,
+  ten_sp: prod.ten_sp,
+  trang_thai: prod.trang_thai
+});
 
     const existing = importCart.find(i => i.ma_sp === prodId);
 
@@ -1223,14 +1378,16 @@ const handleCheckout = async () => {
                       style={{ width: '100%' }}
                       allowClear
                     >
-                      {customers.map(c => (
-                        <Option
-                          key={c.so_dien_thoai}
-                          value={c.so_dien_thoai}
-                        >
-                          {c.ho_ten} - {c.so_dien_thoai} ({c.diem_tich_luy} điểm)
-                        </Option>
-                      ))}
+                      {customers
+    .filter(c => Number(c.trang_thai) === 1)
+    .map(c => (
+        <Option
+            key={c.so_dien_thoai}
+            value={c.so_dien_thoai}
+        >
+            {c.ho_ten} - {c.so_dien_thoai} ({c.diem_tich_luy} điểm)
+        </Option>
+    ))}
                     </Select>
                   </div>
 
@@ -1954,15 +2111,77 @@ const handleCheckout = async () => {
                     key: 'hang_thanh_vien'
                   },
                   {
-                    title: 'Dư Nợ',
-                    dataIndex: 'du_no',
-                    key: 'du_no',
-                    render: val => (
-                      <span style={{ color: val > 0 ? 'red' : 'green' }}>
-                        {val.toLocaleString()} đ
-                      </span>
-                    )
-                  }
+    title: 'Trạng Thái',
+    dataIndex: 'trang_thai',
+    key: 'trang_thai',
+    render: (status) => (
+        Number(status) === 1
+            ? <Tag color="success">Đang hoạt động</Tag>
+            : <Tag color="error">Ngừng hoạt động</Tag>
+    )
+},
+                  
+{
+    title: 'Dư Nợ',
+    dataIndex: 'du_no',
+    key: 'du_no',
+    render: val => (
+        <span style={{ color: val > 0 ? 'red' : 'green' }}>
+            {val.toLocaleString()} đ
+        </span>
+    )
+},
+{
+    title: 'Hành Động',
+    key: 'action',
+    render: (_, record) => (
+        <Space>
+            <Button
+                type="primary"
+                size="small"
+                onClick={() => handleEditCustomer(record)}
+            >
+                Chỉnh sửa
+            </Button>
+
+            {Number(record.trang_thai) === 1 ? (
+    <Button
+        danger
+        size="small"
+        onClick={() => {
+            Modal.confirm({
+                title: 'Xác nhận ngừng hoạt động',
+                content: `Bạn có chắc chắn muốn ngừng hoạt động khách hàng "${record.ho_ten}" không?`,
+                okText: 'Đồng ý',
+                cancelText: 'Hủy',
+                okButtonProps: { danger: true },
+                onOk: () => handleStopCustomer(record)
+            });
+        }}
+    >
+        Ngừng hoạt động
+    </Button>
+) : (
+    <Button
+        type="primary"
+        size="small"
+        onClick={() => {
+            Modal.confirm({
+                title: 'Xác nhận kích hoạt khách hàng',
+                content: `Bạn có chắc chắn muốn kích hoạt lại khách hàng "${record.ho_ten}" không?`,
+                okText: 'Kích hoạt',
+                cancelText: 'Hủy',
+                onOk: () => handleActivateCustomer(record)
+            });
+        }}
+    >
+        Kích hoạt lại
+    </Button>
+)}
+        </Space>
+    )
+}
+
                 ]}
               />
             </Card>
@@ -2044,6 +2263,93 @@ const handleCheckout = async () => {
               </div>
             </div>
           </Modal>
+
+{/* MODAL CHỈNH SỬA KHÁCH HÀNG */}
+<Modal
+    title={
+        <span style={{ fontSize: '16px', fontWeight: 'bold' }}>
+            <TeamOutlined /> Chỉnh Sửa Thông Tin Khách Hàng
+        </span>
+    }
+    open={isEditCustomerModalOpen}
+    onOk={handleSaveEditCustomer}
+    onCancel={() => {
+        setIsEditCustomerModalOpen(false);
+        setEditingCustomer(null);
+    }}
+    okText="Lưu Thay Đổi"
+    cancelText="Hủy"
+>
+    <div style={{ padding: '10px 0' }}>
+        <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                Họ và tên:
+            </div>
+            <Input
+                value={editCustomerForm.ho_ten}
+                onChange={e =>
+                    setEditCustomerForm({
+                        ...editCustomerForm,
+                        ho_ten: e.target.value
+                    })
+                }
+                placeholder="Nhập họ và tên..."
+                size="large"
+            />
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                Số điện thoại:
+            </div>
+            <Input
+                value={editCustomerForm.so_dien_thoai}
+                onChange={e =>
+                    setEditCustomerForm({
+                        ...editCustomerForm,
+                        so_dien_thoai: e.target.value
+                    })
+                }
+                placeholder="Nhập số điện thoại..."
+                size="large"
+            />
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                Email:
+            </div>
+            <Input
+                value={editCustomerForm.email}
+                onChange={e =>
+                    setEditCustomerForm({
+                        ...editCustomerForm,
+                        email: e.target.value
+                    })
+                }
+                placeholder="Nhập email..."
+                size="large"
+            />
+        </div>
+
+        <div>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                Địa chỉ:
+            </div>
+            <Input.TextArea
+                value={editCustomerForm.dia_chi}
+                onChange={e =>
+                    setEditCustomerForm({
+                        ...editCustomerForm,
+                        dia_chi: e.target.value
+                    })
+                }
+                placeholder="Nhập địa chỉ..."
+                rows={3}
+            />
+        </div>
+    </div>
+</Modal>
 
 
           {/* MODAL THÊM NHÀ CUNG CẤP MỚI */}

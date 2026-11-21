@@ -2365,21 +2365,39 @@ app.get('/api/customers', verifyToken, requireAdmin, (req, res) => {
     });
 });
 // API them khach hang moi
+
+// API them khach hang
 app.post('/api/customers', verifyToken, requireAdmin, (req, res) => {
     const { ho_ten, so_dien_thoai, email, dia_chi } = req.body;
 
-    // Kiem tra du lieu
-    if (!ho_ten || !so_dien_thoai) {
+    // Kiem tra du lieu bat buoc
+    if (
+        typeof ho_ten !== 'string' ||
+        typeof so_dien_thoai !== 'string' ||
+        !ho_ten.trim() ||
+        !so_dien_thoai.trim()
+    ) {
         return res.status(400).json({
             success: false,
             message: 'Ho ten va so dien thoai khong duoc de trong!'
         });
     }
 
+    // Chuan hoa va kiem tra so dien thoai
+    const normalizedPhone = so_dien_thoai.trim().replace(/\s+/g, '');
+    const phoneRegex = /^(0|\+84)[35789][0-9]{8}$/;
+
+    if (!phoneRegex.test(normalizedPhone)) {
+        return res.status(400).json({
+            success: false,
+            message: 'So dien thoai khong hop le! Vui long nhap so dien thoai Viet Nam.'
+        });
+    }
+
     // Kiem tra so dien thoai da ton tai
     db.get(
         'SELECT id FROM KhachHang WHERE so_dien_thoai = ?',
-        [so_dien_thoai],
+        [normalizedPhone],
         (err, customer) => {
             if (err) {
                 return res.status(500).json({
@@ -2414,9 +2432,9 @@ app.post('/api/customers', verifyToken, requireAdmin, (req, res) => {
                 sql,
                 [
                     ho_ten.trim(),
-                    so_dien_thoai.trim(),
-                    email || null,
-                    dia_chi || null
+                    normalizedPhone,
+                    email?.trim() || null,
+                    dia_chi?.trim() || null
                 ],
                 function(err) {
                     if (err) {
@@ -2433,10 +2451,10 @@ app.post('/api/customers', verifyToken, requireAdmin, (req, res) => {
                         message: 'Them khach hang thanh cong!',
                         data: {
                             id: this.lastID,
-                            ho_ten: ho_ten,
-                            so_dien_thoai: so_dien_thoai,
-                            email: email || null,
-                            dia_chi: dia_chi || null,
+                            ho_ten: ho_ten.trim(),
+                            so_dien_thoai: normalizedPhone,
+                            email: email?.trim() || null,
+                            dia_chi: dia_chi?.trim() || null,
                             diem_tich_luy: 0,
                             hang_thanh_vien: 'THANH_VIEN',
                             du_no: 0
@@ -2447,15 +2465,30 @@ app.post('/api/customers', verifyToken, requireAdmin, (req, res) => {
         }
     );
 });
+
+// API cap nhat thong tin khach hang
+
 // API cap nhat thong tin khach hang
 app.put('/api/customers/:id', verifyToken, requireAdmin, (req, res) => {
     const id = req.params.id;
     const { ho_ten, so_dien_thoai, email, dia_chi } = req.body;
 
-    if (!ho_ten || !so_dien_thoai) {
+    // Kiem tra thong tin bat buoc
+    if (!ho_ten?.trim() || !so_dien_thoai?.trim()) {
         return res.status(400).json({
             success: false,
             message: 'Ho ten va so dien thoai khong duoc de trong!'
+        });
+    }
+
+    // Chuan hoa va kiem tra so dien thoai
+    const normalizedPhone = so_dien_thoai.trim().replace(/\s+/g, '');
+    const phoneRegex = /^(0|\+84)[35789][0-9]{8}$/;
+
+    if (!phoneRegex.test(normalizedPhone)) {
+        return res.status(400).json({
+            success: false,
+            message: 'So dien thoai khong hop le!'
         });
     }
 
@@ -2481,7 +2514,7 @@ app.put('/api/customers/:id', verifyToken, requireAdmin, (req, res) => {
             // Kiem tra so dien thoai trung voi khach hang khac
             db.get(
                 'SELECT id FROM KhachHang WHERE so_dien_thoai = ? AND id != ?',
-                [so_dien_thoai, id],
+                [normalizedPhone, id],
                 (err, duplicate) => {
                     if (err) {
                         return res.status(500).json({
@@ -2497,7 +2530,7 @@ app.put('/api/customers/:id', verifyToken, requireAdmin, (req, res) => {
                         });
                     }
 
-                    // Cap nhat thong tin
+                    // Cap nhat thong tin khach hang
                     db.run(
                         `UPDATE KhachHang
                          SET ho_ten = ?,
@@ -2507,9 +2540,9 @@ app.put('/api/customers/:id', verifyToken, requireAdmin, (req, res) => {
                          WHERE id = ?`,
                         [
                             ho_ten.trim(),
-                            so_dien_thoai.trim(),
-                            email || null,
-                            dia_chi || null,
+                            normalizedPhone,
+                            email?.trim() || null,
+                            dia_chi?.trim() || null,
                             id
                         ],
                         function(err) {
@@ -2525,10 +2558,10 @@ app.put('/api/customers/:id', verifyToken, requireAdmin, (req, res) => {
                                 message: 'Cap nhat khach hang thanh cong!',
                                 data: {
                                     id: Number(id),
-                                    ho_ten: ho_ten,
-                                    so_dien_thoai: so_dien_thoai,
-                                    email: email || null,
-                                    dia_chi: dia_chi || null
+                                    ho_ten: ho_ten.trim(),
+                                    so_dien_thoai: normalizedPhone,
+                                    email: email?.trim() || null,
+                                    dia_chi: dia_chi?.trim() || null
                                 }
                             });
                         }
@@ -2538,6 +2571,58 @@ app.put('/api/customers/:id', verifyToken, requireAdmin, (req, res) => {
         }
     );
 });
+
+// API ngung hoat dong khach hang
+app.put('/api/customers/:id/stop', verifyToken, requireAdmin, (req, res) => {
+    const id = req.params.id;
+
+    // Kiem tra khach hang co ton tai khong
+    db.get(
+        'SELECT id, trang_thai FROM KhachHang WHERE id = ?',
+        [id],
+        (err, customer) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Loi kiem tra khach hang!'
+                });
+            }
+
+            if (!customer) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Khong tim thay khach hang!'
+                });
+            }
+
+            if (Number(customer.trang_thai) === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Khach hang da ngung hoat dong!'
+                });
+            }
+
+            db.run(
+                'UPDATE KhachHang SET trang_thai = 0 WHERE id = ?',
+                [id],
+                function(err) {
+                    if (err) {
+                        return res.status(500).json({
+                            success: false,
+                            message: 'Khong the ngung hoat dong khach hang!'
+                        });
+                    }
+
+                    res.json({
+                        success: true,
+                        message: 'Ngung hoat dong khach hang thanh cong!'
+                    });
+                }
+            );
+        }
+    );
+});
+
 // API ngung hoat dong khach hang
 app.put('/api/customers/:id/stop', verifyToken, requireAdmin, (req, res) => {
     const id = req.params.id;
@@ -2586,6 +2671,55 @@ app.put('/api/customers/:id/stop', verifyToken, requireAdmin, (req, res) => {
                             ho_ten: customer.ho_ten,
                             trang_thai: 0
                         }
+                    });
+                }
+            );
+        }
+    );
+});
+// API kich hoat lai khach hang
+app.put('/api/customers/:id/activate', verifyToken, requireAdmin, (req, res) => {
+    const id = req.params.id;
+
+    db.get(
+        'SELECT id, trang_thai FROM KhachHang WHERE id = ?',
+        [id],
+        (err, customer) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Loi kiem tra khach hang!'
+                });
+            }
+
+            if (!customer) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Khong tim thay khach hang!'
+                });
+            }
+
+            if (Number(customer.trang_thai) === 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Khach hang dang hoat dong!'
+                });
+            }
+
+            db.run(
+                'UPDATE KhachHang SET trang_thai = 1 WHERE id = ?',
+                [id],
+                function(err) {
+                    if (err) {
+                        return res.status(500).json({
+                            success: false,
+                            message: 'Khong the kich hoat khach hang!'
+                        });
+                    }
+
+                    res.json({
+                        success: true,
+                        message: 'Kich hoat lai khach hang thanh cong!'
                     });
                 }
             );
